@@ -1,0 +1,20 @@
+[Unit]
+Description=Proximity and Impact Warning System (dashboard + sensor runtime)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+Environment=PYTHONUNBUFFERED=1
+# --noreload keeps ONE process: it owns the GPIO pins and the radios, and starts the runtime thread.
+ExecStart=__APP_DIR__/.venv/bin/python manage.py runserver 0.0.0.0:8000 --noreload
+# On stop (SIGTERM) the app forces buzzer and LED off before it exits.
+Restart=on-failure
+RestartSec=5
+SupplementaryGroups=dialout gpio
+
+[Install]
+WantedBy=multi-user.target

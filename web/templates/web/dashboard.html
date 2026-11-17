@@ -1,252 +1,50 @@
 {% extends 'web/base.html' %}
 {% load static %}
-
-{% block title %}Șofer | Dashboard{% endblock %}
-
+{% block title %}Dashboard | Proximity and Impact Warning{% endblock %}
 {% block content %}
-<div class="dashboard-grid">
-  <section class="panel hero-panel">
-    <div class="hero-copy">
-      <div class="eyebrow">Dashboard șofer</div>
-      <h1>Vehicul V1</h1>
-      <p>Radar de proximitate • alertă vizuală + sonoră • stare reală și simulare</p>
-    </div>
-    <div class="hero-status">
-      <div class="big-stat">
-        <span class="label">Viteză</span>
-        <strong id="speed-value">--</strong>
-        <small>km/h</small>
-      </div>
-      <div class="big-stat">
-        <span class="label">Direcție</span>
-        <strong id="heading-value">--</strong>
-        <small>°</small>
-      </div>
-    </div>
-  </section>
+<section class="grid">
+  <article class="card card-distance">
+    <h2>Distance</h2>
+    <div class="distance"><span id="distance">--</span><small> cm</small></div>
+    <div class="note" id="fault" hidden>SENSOR FAULT: no valid echo</div>
+  </article>
 
-  <section class="panel radar-panel">
-    <div class="panel-header">
-      <h2>Radar</h2>
-      <span id="neighbour-count" class="pill-text">0 vecini</span>
+  <article class="card">
+    <h2>Alert level</h2>
+    <div class="levels" id="levels" aria-label="Alert level">
+      <span data-level="0">0 Clear</span><span data-level="1">1 Caution</span>
+      <span data-level="2">2 Warning</span><span data-level="3">3 Danger</span>
     </div>
-    <svg id="radar-svg" class="radar-svg" viewBox="0 0 500 500" role="img" aria-label="Radar de proximitate"></svg>
-  </section>
+  </article>
 
-  <aside class="panel side-panel">
-    <div class="panel-header">
-      <h2>Stare</h2>
-      <span id="alert-state" class="pill-text neutral">În siguranță</span>
+  <article class="card">
+    <h2>Outputs</h2>
+    <div class="indicators">
+      <div class="ind" id="ind-buzzer"><i></i>Buzzer</div>
+      <div class="ind" id="ind-led"><i></i>LED</div>
+      <div class="ind ind-impact" id="ind-impact"><i></i>Impact</div>
     </div>
-    <div class="mini-metrics">
-      <div>
-        <span>Dist. de alertă</span>
-        <strong id="distance-value">-- m</strong>
-      </div>
-      <div>
-        <span>Surse</span>
-        <strong id="source-value">--</strong>
-      </div>
-      <div>
-        <span>Expiră</span>
-        <strong id="expires-value">-- s</strong>
-      </div>
-    </div>
-    <div class="checklist">
-      <h3>Pași de pornire</h3>
-      <ul>
-        <li>✔ Hardware detectat</li>
-        <li>✔ Dispozitive conectate</li>
-        <li>✔ Test rulat</li>
-        <li>✔ Simulare pornită</li>
-      </ul>
-    </div>
-  </aside>
+  </article>
 
-  <section class="panel alert-panel hidden" id="alert-panel">
-    <div class="alert-banner">
-      <div>
-        <span class="alert-kicker">ATENȚIE</span>
-        <h3 id="alert-message">IMPACT ÎN FAȚĂ</h3>
-      </div>
-      <button type="button" class="alert-confirm" id="alert-confirm">Confirmă</button>
-    </div>
-  </section>
+  <article class="card">
+    <h2>Radios</h2>
+    <div class="radio"><b>LoRa Meshtastic</b> <span class="badge" id="mesh-state">--</span>
+      <span class="badge badge-sim" id="mesh-sim" hidden>SIMULATED</span>
+      <div class="small" id="mesh-stats"></div></div>
+    <div class="radio"><b>Zigbee</b> <span class="badge" id="zigbee-state">--</span>
+      <span class="badge badge-sim" id="zigbee-sim" hidden>SIMULATED</span>
+      <div class="small" id="zigbee-stats"></div></div>
+  </article>
 
-  <section class="panel chart-panel">
-    <div class="panel-header">
-      <h2>Conexiune radio</h2>
-      <span class="pill-text neutral">Zigbee + Meshtastic</span>
-    </div>
-    <div class="chart-bars">
-      <div class="chart-row">
-        <span>Zigbee</span>
-        <div class="chart-track"><i id="zigbee-signal-bar" style="width: 72%"></i></div>
-        <strong id="zigbee-signal-value">72%</strong>
-      </div>
-      <div class="chart-row">
-        <span>Meshtastic</span>
-        <div class="chart-track"><i id="meshtastic-signal-bar" style="width: 91%"></i></div>
-        <strong id="meshtastic-signal-value">91%</strong>
-      </div>
-      <div class="chart-row">
-        <span>Hardware</span>
-        <div class="chart-track"><i id="hardware-signal-bar" style="width: 68%"></i></div>
-        <strong id="hardware-signal-value">68%</strong>
-      </div>
-    </div>
-  </section>
+  <article class="card">
+    <h2>Last remote alert</h2>
+    <div id="remote" class="remote">None received</div>
+  </article>
 
-  <section class="panel utility-panel">
-    <div class="panel-header">
-      <h2>Calitate radio și dispozitive</h2>
-    </div>
-    <div class="utility-grid">
-      <div class="utility-card">
-        <span>RSSI Zigbee</span>
-        <strong id="rssi-zigbee">-- dBm</strong>
-      </div>
-      <div class="utility-card">
-        <span>RSSI Meshtastic</span>
-        <strong id="rssi-meshtastic">-- dBm</strong>
-      </div>
-      <div class="utility-card">
-        <span>PDR</span>
-        <strong id="pdr-summary">--%</strong>
-      </div>
-      <div class="utility-card">
-        <span>Dispozitive</span>
-        <strong id="device-summary">--</strong>
-      </div>
-    </div>
-    <div class="mini-bars">
-      <div class="bar-row">
-        <label>Mesh</label>
-        <div class="bar-track"><i id="mesh-health-bar" style="width: 80%"></i></div>
-        <strong id="mesh-health-value">80%</strong>
-      </div>
-      <div class="bar-row">
-        <label>USB</label>
-        <div class="bar-track"><i id="usb-health-bar" style="width: 70%"></i></div>
-        <strong id="usb-health-value">70%</strong>
-      </div>
-      <div class="bar-row">
-        <label>Poziție</label>
-        <div class="bar-track"><i id="position-health-bar" style="width: 88%"></i></div>
-        <strong id="position-health-value">88%</strong>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel chart-panel">
-    <div class="panel-header">
-      <h2>Trenduri simulare</h2>
-      <span class="pill-text neutral">Live</span>
-    </div>
-    <div class="trend-grid">
-      <div class="trend-card">
-        <div class="trend-header">
-          <span>Risc impact</span>
-          <strong id="risk-index">82%</strong>
-        </div>
-        <div class="spark-bars">
-          <span class="spark-bar" data-trend="risk" style="height: 34%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 42%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 52%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 68%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 80%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 72%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 84%"></span>
-          <span class="spark-bar" data-trend="risk" style="height: 92%"></span>
-        </div>
-      </div>
-
-      <div class="trend-card">
-        <div class="trend-header">
-          <span>Viteză</span>
-          <strong id="speed-trend-value">58 km/h</strong>
-        </div>
-        <div class="spark-bars">
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 32%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 38%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 47%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 58%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 64%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 61%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 72%"></span>
-          <span class="spark-bar spark-speed" data-trend="speed" style="height: 84%"></span>
-        </div>
-      </div>
-
-      <div class="trend-card">
-        <div class="trend-header">
-          <span>Latență</span>
-          <strong id="latency-trend-value">420 ms</strong>
-        </div>
-        <div class="spark-bars">
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 28%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 44%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 52%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 60%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 66%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 54%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 48%"></span>
-          <span class="spark-bar spark-latency" data-trend="latency" style="height: 58%"></span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel table-panel">
-    <div class="panel-header">
-      <h2>Mapare pini</h2>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Pin</th>
-          <th>Tip</th>
-          <th>Nume</th>
-          <th>Definiție</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for pin in pins %}
-          <tr>
-            <td>{{ pin.pin }}</td>
-            <td>{{ pin.tip }}</td>
-            <td>{{ pin.nume }}</td>
-            <td>{{ pin.definitie }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
-
-  <section class="panel table-panel">
-    <div class="panel-header">
-      <h2>Vecini relevanți</h2>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Sursă</th>
-          <th>Distanță</th>
-          <th>Orientare</th>
-          <th>Viteză</th>
-          <th>Ultimul RX</th>
-        </tr>
-      </thead>
-      <tbody id="neighbours-table-body"></tbody>
-    </table>
-  </section>
-</div>
+  <article class="card card-wide">
+    <h2>Event log</h2>
+    <ul class="log" id="events"></ul>
+  </article>
+</section>
 {% endblock %}
-
-{% block scripts %}
-{{ state|json_script:"state-data" }}
-<script src="{% static 'web/js/state.js' %}"></script>
-<script src="{% static 'web/js/radar.js' %}"></script>
-<script src="{% static 'web/js/alert.js' %}"></script>
-{% endblock scripts %}
+{% block scripts %}<script src="{% static 'web/js/dashboard.js' %}"></script>{% endblock %}

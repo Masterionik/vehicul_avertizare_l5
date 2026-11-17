@@ -1,99 +1,150 @@
-# Sistem hibrid de avertizare a vehiculelor – L4 (drivere MCD, Django)
+# Proximity and Impact Warning System
 
-Rezolvarea cerințelor din L4, pe baza arhitecturii din L2 și L3 (Raspberry Pi 5, MPU6050, buzzer/LED, XBee3 Zigbee, modul Meshtastic).
+A vehicle node that measures the distance to an obstacle, detects impacts, warns the driver with a buzzer and an
+LED, and shares warnings with nearby nodes over Zigbee (short range) and LoRa Meshtastic (long range). A dashboard
+runs on the same Raspberry Pi.
 
-| Cerință L4 | Unde este |
-| --- | --- |
-| 1. Codul pentru modulele proiectului | `mcd/pcs.py` (GPIO), `mcd/i2c.py` (+ `mcd/mpu6050.py`), `mcd/usb.py`, `mcd/tim.py`, `mcd/config.py` |
-| 2. Fișier `test.py` care testează toate driverele | `mcd/test.py` |
-| 3. Tabel cu descrierea și maparea pinilor | `docs/tabel_pini.md`, pagina `/` și `/api/pins/` (sursa: `PIN_TABLE` din `mcd/config.py`) |
+University project for "Proiectarea sistemelor incorporate" (labs L1-L5). **Warning only: the system never controls
+brakes or engine.**
 
-## Drivere (nivelul MCD din L3)
+## Features
 
-| Fișier | Driver | Funcții principale |
-| --- | --- | --- |
-| `pcs.py` | GPIO (lgpio) | `PCS_vInit`, `PCS_vSetOutputGpio` (din L3: pin 0–27, valoare 0/1, parametri invalizi ignorați), `PCS_u8GetGpio`, `PCS_vConfigInput`, `PCS_vDeinit` |
-| `i2c.py` | I2C (smbus2) | `I2C_vInit`, `I2C_u8ReadReg`, `I2C_vWriteReg`, `I2C_lReadBlock`, `I2C_vDeinit` |
-| `mpu6050.py` | acces MPU6050 peste I2C | `MPU6050_vInit`, `MPU6050_tReadRaw`, `MPU6050_tReadG`, `MPU6050_fReadMagnitudeG` |
-| `usb.py` | USB serial (pyserial) – XBee3 și Meshtastic | `USB_vOpen`, `USB_u16Write`, `USB_baRead`, `USB_u16Available`, `USB_vClose` |
-| `tim.py` | temporizare prin polling pentru SCHED | `TIM_vStart` (1 s / 60 s / alertă), `TIM_bHasElapsed`, `TIM_u32GetMs`, `TIM_vDelayMs` |
+- Ultrasonic distance (HC-SR04) turned into an alert level 0-3 (clear / caution / warning / danger) with debounce and
+  hysteresis.
+- Impact detection from digital vibration sensors (edge counting).
+- Buzzer and LED patterns per level, without PWM.
+- One signed 14-byte alert packet (4-byte truncated HMAC-SHA256, replay protection) used on both radios.
+- Zigbee (XBee3) and LoRa Meshtastic links; each falls back to simulation when its hardware is missing, and says so
+  (badge `SIMULATED`).
+- AUTOSAR-style layers (`mcd`, `ioc`, `sdc`, `sched`, `rte`, `app`) with the RTE as the only door to the hardware (lab L5).
+- Django dashboard: live state, devices, simulation controls, component tests.
+- Everything runs and is testable on a laptop with no hardware (`MCD_SIMULATE=1`).
 
-Driverele nu depind de Django. Dacă lipsește hardware-ul sau biblioteca (de exemplu pe PC), rulează într-un mod de simulare (MPU6050 simulat, buffere USB în memorie), deci tot proiectul poate fi dezvoltat și testat în VS Code fără Raspberry Pi.
-Modul se controlează cu variabila `MCD_SIMULATE`: `auto` (implicit), `1` (simulare forțată), `0` (hardware forțat).
+## Quick start: laptop (simulation)
 
-IOC, SDC, RTE, SCHED și aplicația (POS, ACC, NBR, HMI, RPT) sunt straturile de deasupra și nu fac parte din L4.
-
-## Rulare în Visual Studio Code
+Needs Python 3.10+.
 
 ```bash
-cd vehicul_avertizare
-python -m venv .venv
-# Windows: .venv\Scripts\activate      Linux/macOS: source .venv/bin/activate
+python3 -m venv .venv
+. .venv/bin/activate
 pip install -r requirements.txt
-
-python -m mcd.test          # doar driverele (fără Django)
-python manage.py test       # drivere + stratul Django
-python manage.py runserver  # http://127.0.0.1:8000/
+MCD_SIMULATE=1 python manage.py test                      # all tests
+MCD_SIMULATE=1 DJANGO_DEBUG=1 python manage.py runserver  # http://127.0.0.1:8000/
 ```
 
-În VS Code: **Run and Debug** are trei configurații (runserver, teste Django, `python -m mcd.test`).
-Pagina `/` afișează un dashboard modern cu date dummy (vecini vehicul, nivel risc, trend accelerație), tabelul de pini, butonul de citire a accelerometrului (`/api/accel/`) și butonul de auto-test (`/api/selftest/`).
+`DJANGO_DEBUG=1` is needed for local runs because without it Django requires a real `DJANGO_SECRET_KEY`.
+Open the **Simulation** page to move the simulated distance, inject vibration edges, or make the extra vehicles V2 / V3
+send alerts.
 
-API-ul dashboard este disponibil la `/api/dashboard/` și livrează JSON pentru:
-- vehiculul curent (viteză, heading, GPS),
-- vecini din Zigbee/Meshtastic cu risc estimat,
-- trend accelerație pentru ultimele eșantioane,
-- sumar al alertelor active.
+## Quick start: Raspberry Pi (real hardware)
 
-## Pe Raspberry Pi (hardware real)
+Wire the hardware first ([docs/hardware.md](docs/hardware.md)). On Raspberry Pi OS:
 
 ```bash
-sudo raspi-config            # Interface Options -> I2C -> Enable
+sudo apt update
+sudo apt install python3-lgpio python3-venv git
+sudo usermod -aG dialout,gpio "$USER"        # log out and in again afterwards
+
+cd proximity-warning                          # the project folder
+python3 -m venv --system-site-packages .venv  # system site packages: lgpio comes from apt
+. .venv/bin/activate
 pip install -r requirements-pi.txt
-MCD_HW_TESTS=1 python -m mcd.test HardwareSmokeTest   # pulsează LED/buzzer, citește MPU6050, verifică porturile USB
+
+cp .env.example .env
+nano .env                                     # set DJANGO_SECRET_KEY, MESH_HMAC_KEY, DJANGO_ALLOWED_HOSTS
 ```
 
-Porturile USB implicite: `/dev/ttyUSB0` (XBee3, 9600 baud), `/dev/ttyACM0` (Meshtastic, 115200 baud). Se pot schimba cu `MCD_ZIGBEE_PORT` și `MCD_MESHTASTIC_PORT`.
-
-## Testare pe Raspberry Pi, simulare și hardware real
-
-Pentru ghidul complet cu comenzi, verificări, Meshtastic și teste de validare pe Pi, vezi:
-
-- `docs/testare_pi_simulare_hardware.md`
-- `GHID_TESTARE_SI_LIVRABILE.md`
-
-### Adăugarea unui Heltec V3 / Meshtastic
-
-Dacă conectezi un Heltec V3:
+Test run (MCD_SIMULATE=0 is the real hardware):
 
 ```bash
-ls /dev/ttyACM*
-meshtastic --port /dev/ttyACM0 --info
-# sau, pe WiFi:
-meshtastic --host 192.168.1.50 --info
+set -a; . ./.env; set +a
+MCD_SIMULATE=0 python manage.py runserver 0.0.0.0:8000 --noreload
 ```
 
-Dacă placa este validă, apare în aplicație ca nod Meshtastic. Se recomandă USB serial pentru testare locală și WiFi/TCP dacă placa este la distanță pe aceeași rețea. Pentru Meshtastic există și conexiune TCP pe port 4403, dar USB este preferat pentru debug rapid.
-
-Comenzi rapide:
+Autostart with systemd (uses `.venv` and loads `.env`):
 
 ```bash
-# simulare
-MCD_SIMULATE=1 python manage.py runserver 0.0.0.0:8000
-
-# hardware real
-MCD_SIMULATE=0 python manage.py runserver 0.0.0.0:8000
-
-# verificare porturi
-ls /dev/ttyUSB*
-ls /dev/ttyACM*
-
-# verificare Meshtastic
-meshtastic --port /dev/ttyACM0 --info
+sudo ./scripts/install-service.sh            # add --kiosk for the optional full-screen browser
+journalctl -u proximity -f                   # logs
 ```
 
-## Observații
+Open `http://<pi-name-or-ip>:8000/` from a phone or laptop on the same network (the name or IP must be listed in
+`DJANGO_ALLOWED_HOSTS`).
 
-- `MPU6050_vInit` acceptă doar WHO_AM_I = 0x68; unele plăci clonă raportează altă valoare.
-- Pe Pi 5, lgpio încearcă `gpiochip4`, apoi `gpiochip0`.
-- Pagina de auto-test rulează doar testele în simulare, nu pornește buzzerul real.
+## Configuration
+
+Set in `.env` (see `.env.example`). The systemd service reads it automatically; on a laptop use
+`set -a; . ./.env; set +a` or put the variables in front of the command.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MCD_SIMULATE` | auto (hardware present?) | `1` forces simulation, `0` forces real GPIO and radios |
+| `DJANGO_DEBUG` | `0` | `1` for development only |
+| `DJANGO_SECRET_KEY` | none | Required when `DJANGO_DEBUG=0` |
+| `DJANGO_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Comma separated host names / IPs |
+| `DJANGO_TIME_ZONE` | `UTC` | Time zone of the dashboard |
+| `ZIGBEE_PORT` | auto (`/dev/serial/by-id`) | XBee serial port; required if the detection is ambiguous. Old name `MCD_ZIGBEE_PORT` still works |
+| `MESHTASTIC_PORT` | auto (`/dev/serial/by-id`) | Heltec V3 serial port. Old name `MCD_MESHTASTIC_PORT` still works |
+| `MCD_VIB2` | `1` | `0` if only one vibration sensor is fitted |
+| `MCD_GPIOCHIP` | auto | GPIO chip number or name |
+| `MESH_HMAC_KEY` | dev key (logs a warning) | Shared signing key, identical on all nodes |
+| `MESH_NODE_ID` | derived from host name | Fixed 32-bit node id |
+| `SIM_V2_PORT`, `SIM_V2_HOST`, `SIM_V3_PORT`, `SIM_V3_HOST` | empty | Serial port or TCP host of the extra boards used as remote vehicles V2 / V3; empty = simulated |
+| `SIM_V2_NODE_ID`, `SIM_V3_NODE_ID` | derived from name | Node ids of the remote vehicles |
+| `NODE_AUTOSTART` | `1` | `0` stops the web app from starting the runtime thread |
+
+## Project structure
+
+```text
+config/    Django project package (settings, urls, wsgi)
+mcd/       drivers: pcs (GPIO), ultrasonic, usb, tim, config
+ioc/       logical channels -> drivers (buzzer, LED, distance, vibration)
+sdc/       packets, transports, Meshtastic and Zigbee links, device registry
+sched/     100 ms / 1 s / 60 s ticks
+rte/       the application's only interface to the BSW + signals (lab L5), test.py = unit test
+app/       logic: prx (proximity), imp (impact), alr (alerts), rpt (report), node (runtime)
+sim/       scripted remote vehicles V2 / V3, device manager
+web/       dashboard, API, templates, static files
+tests/     tests of app, packets, layers, web
+scripts/   systemd service installer, optional kiosk
+docs/      architecture, hardware, rte_api, testing
+```
+
+Runtime files (`data/`, `logs/`, reports) are created on demand and ignored by git.
+
+## Tests
+
+```bash
+MCD_SIMULATE=1 python -m mcd.test        # drivers
+MCD_SIMULATE=1 python -m rte.test        # RTE unit test (lab L5)
+MCD_SIMULATE=1 python manage.py test     # everything
+```
+
+Hardware tests run only with `MCD_HW_TESTS=1` on the Pi. The full plan is in [docs/testing.md](docs/testing.md).
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `ImproperlyConfigured: DJANGO_SECRET_KEY is not set` | Set it in `.env`, or use `DJANGO_DEBUG=1` on a laptop |
+| `DisallowedHost` / HTTP 400 in the browser | Add the host name or IP you typed to `DJANGO_ALLOWED_HOSTS` |
+| `Django is not installed` | Activate the venv: `. .venv/bin/activate` |
+| Dashboard shows a `SIMULATION` badge on the Pi | `MCD_SIMULATE` is `1`, `lgpio` is missing (venv without `--system-site-packages`), or `/dev/gpiochip*` is not accessible: check the `gpio` group |
+| Zigbee shows `SIMULATED` | No XBee found. Check `ls -l /dev/serial/by-id/`, the `dialout` group, or set `ZIGBEE_PORT` |
+| Port detection says "ambiguous" | Two matching adapters are plugged in: set `ZIGBEE_PORT` and `MESHTASTIC_PORT` |
+| Distance always invalid on the Pi | ECHO divider or wiring wrong, sensor not on 5 V, or object closer than 2 cm / farther than 4 m |
+| Constant false impacts | Vibration sensor too sensitive: turn its potentiometer, or mount it away from the buzzer |
+| `Permission denied: /dev/ttyUSB0` | `sudo usermod -aG dialout $USER`, then log in again |
+| Warning "development HMAC key" in the log | Set `MESH_HMAC_KEY` (same value on every node) |
+| Packets from another node are dropped | Different `MESH_HMAC_KEY`, or the sender repeated an old sequence number (replay guard) |
+| `pip install` fails for `lgpio` on the Pi | Do not install it with pip: `sudo apt install python3-lgpio` and use `--system-site-packages` |
+| Static files missing | They are served by WhiteNoise from `web/static`; with a custom setup run `python manage.py collectstatic` |
+| Service does not start | `journalctl -u proximity -e`; usually a missing `.env` value or a wrong venv path |
+
+## More documentation
+
+- [docs/architecture.md](docs/architecture.md): layers, data flow, packet format, threading, Zigbee vs LoRa.
+- [docs/hardware.md](docs/hardware.md): parts, wiring, pins, radio setup.
+- [docs/rte_api.md](docs/rte_api.md): every RTE function in the lab table format.
+- [docs/testing.md](docs/testing.md): test plan and acceptance checklist.
+- [AGENTS.md](AGENTS.md): project rules.

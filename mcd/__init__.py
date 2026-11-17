@@ -1,6 +1,5 @@
-"""MCD – drivere pentru nivelul de abstractizare a microcontrolerului (L4).
+"""MCD: microcontroller abstraction drivers (lab L4).
 
-Sistem hibrid de avertizare a vehiculelor (Raspberry Pi 5).
-Driverele sunt Python pur și NU depind de Django; aplicația Django doar
-le expune (pagină cu tabelul de pini, API JSON, auto-test).
+Proximity and impact warning system (Raspberry Pi).
+The drivers are pure Python and do NOT depend on Django.
 """

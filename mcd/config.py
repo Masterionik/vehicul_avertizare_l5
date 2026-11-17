@@ -1,10 +1,10 @@
-"""Configurație MCD: mapare pini, canale și mod de simulare."""
+"""MCD configuration: pin mapping, channels and simulation mode."""
 import os
 
-# ---------------------------------------------------------------- simulare
-# MCD_SIMULATE = "auto" (implicit): hardware real dacă biblioteca și
-#                dispozitivul există, altfel simulare (rulare pe PC);
-#                "1": simulare forțată; "0": hardware forțat (eroare dacă lipsește).
+# --------------------------------------------------------------- simulation
+# MCD_SIMULATE = "auto" (default): real hardware if the library and the device
+#                exist, otherwise simulation (running on a PC);
+#                "1": forced simulation; "0": forced hardware (error if missing).
 SIM_ENV = "MCD_SIMULATE"
 
 
@@ -13,7 +13,7 @@ def simulation_mode():
 
 
 def use_simulation(hw_available):
-    """Decide dacă un driver rulează în simulare."""
+    """Decide whether a driver runs in simulation."""
     mode = simulation_mode()
     if mode in ("1", "true", "yes", "on"):
         return True
@@ -22,30 +22,103 @@ def use_simulation(hw_available):
     return not hw_available
 
 
-# -------------------------------------------------------------------- GPIO
+# --------------------------------------------------------------------- GPIO
 PCS_PIN_MIN = 0
-PCS_PIN_MAX = 27          # interval valid din L3 (BCM)
+PCS_PIN_MAX = 27          # valid range from L3 (BCM numbering)
 
-GPIO_I2C_SDA = 2
-GPIO_I2C_SCL = 3
-GPIO_BUZZER = 17          # buzzer prin tranzistor NPN
-GPIO_LED = 27             # LED cu rezistență de 330 ohm
+GPIO_BUZZER = 17          # buzzer through an NPN transistor
+GPIO_LED = 27             # LED with a 330 ohm resistor
+GPIO_US_TRIG = 23         # HC-SR04 TRIG (3.3 V output is enough to trigger it)
+GPIO_US_ECHO = 24         # HC-SR04 ECHO (5 V signal: needs a 1 kOhm + 2 kOhm divider)
+GPIO_VIB = (22, 25)       # digital vibration sensors (SW-420 type); the second is optional
 OUTPUT_PINS = (GPIO_BUZZER, GPIO_LED)
 
-# --------------------------------------------------------------------- I2C
-I2C_BUS_ID = 1            # /dev/i2c-1 pe Raspberry Pi (GPIO2/GPIO3)
-MPU6050_ADDR = 0x68       # AD0 la GND
+VIB2_ENV = "MCD_VIB2"     # "0" = the optional second vibration sensor is not fitted
+
+
+def vibration_pins():
+    """GPIO pins of the vibration sensors that are in use (the second one is optional)."""
+    if os.environ.get(VIB2_ENV, "1").strip().lower() in ("0", "false", "no", "off"):
+        return GPIO_VIB[:1]
+    return tuple(GPIO_VIB)
+
 
 # --------------------------------------------------------------------- USB
-USB_CH_ZIGBEE = 0         # XBee3 prin adaptor USB
-USB_CH_MESHTASTIC = 1     # modul ESP Meshtastic
+USB_CH_ZIGBEE = 0         # XBee3 through a USB adapter
+USB_CH_MESHTASTIC = 1     # Meshtastic modem (Heltec WiFi LoRa 32 V3)
 
+# Serial port names are NOT stable (/dev/ttyUSB0 depends on the plug order), so the ports are
+# identified through /dev/serial/by-id/* (vendor / product strings). Resolution order:
+#   1. environment variable (ZIGBEE_PORT / MESHTASTIC_PORT, legacy MCD_ZIGBEE_PORT / MCD_MESHTASTIC_PORT)
+#   2. exactly one matching device in /dev/serial/by-id
+#   3. the fallback name below (only a last resort)
+# If several devices match and nothing selects one, the environment variable is REQUIRED
+# and the configuration carries an error message that says so.
 _USB_DEFAULTS = {
     USB_CH_ZIGBEE: {"name": "ZIGBEE", "port": "/dev/ttyUSB0", "baud": 9600,
-                    "env": "MCD_ZIGBEE_PORT"},
-    USB_CH_MESHTASTIC: {"name": "MESHTASTIC", "port": "/dev/ttyACM0",
-                        "baud": 115200, "env": "MCD_MESHTASTIC_PORT"},
+                    "envs": ("ZIGBEE_PORT", "MCD_ZIGBEE_PORT"), "kind": "xbee"},
+    USB_CH_MESHTASTIC: {"name": "MESHTASTIC", "port": "/dev/ttyACM0", "baud": 115200,
+                        "envs": ("MESHTASTIC_PORT", "MCD_MESHTASTIC_PORT"), "kind": "meshtastic"},
 }
+
+SERIAL_BY_ID_DIR = "/dev/serial/by-id"
+SERIAL_BY_ID_ENV = "MCD_SERIAL_BY_ID_DIR"      # override of the directory (tests)
+
+# Lower-case substrings of the by-id names. The XBee USB adapters use FTDI chips; the Meshtastic
+# boards use Silicon Labs CP210x (Heltec V3), Espressif native USB (e-ink), Seeed nRF52840 (XIAO).
+_XBEE_HINTS = ("xbee", "digi", "ftdi", "ft232", "ft231", "ft2232")
+_MESHTASTIC_HINTS = ("heltec", "seeed", "xiao", "espressif", "nrf52", "rak", "lilygo", "t-beam",
+                     "silicon_labs", "cp210", "ch340", "ch910", "wch", "1a86")
+# The Heltec V3 (the Pi's own modem) uses a CP210x bridge: preferred when several boards are plugged.
+_MODEM_HINTS = ("cp210", "silicon_labs")
+
+
+class PortSelectionError(ValueError):
+    """Several serial devices match and nothing selects one (set the environment variable)."""
+
+
+def classify_serial_id(name):
+    """Classify a /dev/serial/by-id name: "xbee", "meshtastic" or "unknown"."""
+    low = str(name).lower()
+    if any(hint in low for hint in _XBEE_HINTS):
+        return "xbee"
+    if any(hint in low for hint in _MESHTASTIC_HINTS):
+        return "meshtastic"
+    return "unknown"
+
+
+def list_serial_devices():
+    """USB serial devices from /dev/serial/by-id: [{id, path, realpath, kind}], sorted by id."""
+    directory = os.environ.get(SERIAL_BY_ID_ENV, SERIAL_BY_ID_DIR)
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        path = os.path.join(directory, name)
+        out.append({"id": name, "path": path, "realpath": os.path.realpath(path),
+                    "kind": classify_serial_id(name)})
+    return out
+
+
+def detect_port(kind):
+    """Return the by-id path of the device of this kind, or None if there is none.
+
+    Raises PortSelectionError when the choice is ambiguous.
+    """
+    candidates = [d for d in list_serial_devices() if d["kind"] == kind]
+    if len(candidates) > 1 and kind == "meshtastic":
+        preferred = [d for d in candidates if any(h in d["id"].lower() for h in _MODEM_HINTS)]
+        if len(preferred) == 1:
+            candidates = preferred
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        raise PortSelectionError(
+            "%d %s devices found (%s): set the environment variable explicitly"
+            % (len(candidates), kind, ", ".join(d["id"] for d in candidates)))
+    return candidates[0]["path"]
 
 
 def usb_channels():
@@ -53,34 +126,60 @@ def usb_channels():
 
 
 def usb_config(channel):
-    """Returnează {name, port, baud} pentru canal (portul poate fi suprascris din env)."""
+    """Return {name, port, baud, source, error} for a channel.
+
+    "source" is "env", "by-id" or "default". "error" is None, or a message when the port is
+    ambiguous and must be selected with the environment variable (the port is then the fallback name).
+    """
     if channel not in _USB_DEFAULTS:
-        raise ValueError("canal USB invalid: %r" % (channel,))
-    cfg = dict(_USB_DEFAULTS[channel])
-    cfg["port"] = os.environ.get(cfg.pop("env"), cfg["port"])
+        raise ValueError("invalid USB channel: %r" % (channel,))
+    spec = _USB_DEFAULTS[channel]
+    cfg = {"name": spec["name"], "port": spec["port"], "baud": spec["baud"],
+           "source": "default", "error": None}
+    for env in spec["envs"]:
+        value = os.environ.get(env, "").strip()
+        if value:
+            cfg["port"], cfg["source"] = value, "env"
+            return cfg
+    try:
+        found = detect_port(spec["kind"])
+    except PortSelectionError as exc:
+        cfg["error"] = "%s: %s (%s)" % (spec["name"], exc, " or ".join(spec["envs"]))
+        return cfg
+    if found:
+        cfg["port"], cfg["source"] = found, "by-id"
     return cfg
 
 
-# ------------------------------------------------------- tabel mapare pini
-# Format cerut de L4: Pin | Tip semnal | Nume semnal | Definiție
-# Tipuri: DOP = ieșire digitală, DIP = intrare digitală, COM = comunicație,
-#         PWR = alimentare
+# ------------------------------------------------------------ pin mapping table
+# Format required by L4: Pin | Signal type | Signal name | Definition
+# Types: DOP = digital output, DIP = digital input, COM = communication,
+#        PWR = power supply
 PIN_TABLE = [
-    {"pin": "GPIO2 / SDA1 (pin 3)", "tip": "COM", "nume": "I2C_SDA",
-     "definitie": "Linie date I2C către accelerometrul MPU6050"},
-    {"pin": "GPIO3 / SCL1 (pin 5)", "tip": "COM", "nume": "I2C_SCL",
-     "definitie": "Linie ceas I2C către accelerometrul MPU6050"},
-    {"pin": "GPIO17 (pin 11)", "tip": "DOP", "nume": "BUZZER",
-     "definitie": "Alertă sonoră: rezistență 1 kΩ, bază tranzistor NPN, "
-                  "buzzer între 5 V și colector, diodă de protecție"},
-    {"pin": "GPIO27 (pin 13)", "tip": "DOP", "nume": "LED",
-     "definitie": "Alertă vizuală: LED cu rezistență de 330 Ω către GND"},
-    {"pin": "USB (hub alimentat)", "tip": "COM", "nume": "ZIGBEE",
-     "definitie": "XBee3 Zigbee prin adaptor USB, /dev/ttyUSB0, 9600 baud"},
-    {"pin": "USB (hub alimentat)", "tip": "COM", "nume": "MESHTASTIC",
-     "definitie": "Modul ESP Meshtastic (LoRa), /dev/ttyACM0, 115200 baud"},
-    {"pin": "3V3 (pin 1)", "tip": "PWR", "nume": "VCC_MPU",
-     "definitie": "Alimentare 3,3 V pentru MPU6050"},
-    {"pin": "GND (pin 6)", "tip": "PWR", "nume": "GND",
-     "definitie": "Masă comună (Pi, MPU6050, LED, tranzistor buzzer)"},
+    {"pin": "GPIO17 (pin 11)", "signal_type": "DOP", "signal_name": "BUZZER",
+     "definition": "Audible alert: 1 kOhm resistor to NPN transistor base, "
+                   "active buzzer between 5 V and collector, protection diode"},
+    {"pin": "GPIO27 (pin 13)", "signal_type": "DOP", "signal_name": "LED",
+     "definition": "Visual alert: LED with a 330 Ohm resistor to GND"},
+    {"pin": "GPIO23 (pin 16)", "signal_type": "DOP", "signal_name": "US_TRIG",
+     "definition": "Ultrasonic sensor TRIG: 10 us trigger pulse"},
+    {"pin": "GPIO24 (pin 18)", "signal_type": "DIP", "signal_name": "US_ECHO",
+     "definition": "Ultrasonic sensor ECHO (5 V signal): 1 kOhm in series, then 2 kOhm to GND "
+                   "(voltage divider), so the Pi pin sees about 3.3 V; high time = distance"},
+    {"pin": "GPIO22 (pin 15)", "signal_type": "DIP", "signal_name": "VIB1",
+     "definition": "Vibration sensor 1 (digital output, e.g. SW-420): impact pulses, counted as edges"},
+    {"pin": "GPIO25 (pin 22)", "signal_type": "DIP", "signal_name": "VIB2",
+     "definition": "Optional vibration sensor 2 (digital output): impact pulses, counted as edges"},
+    {"pin": "5V (pin 2)", "signal_type": "PWR", "signal_name": "5V",
+     "definition": "Supply of the ultrasonic sensor VCC and of the buzzer"},
+    {"pin": "3V3 (pin 1)", "signal_type": "PWR", "signal_name": "3V3",
+     "definition": "Supply of the vibration sensor modules (3.3 V logic levels)"},
+    {"pin": "GND (pin 6)", "signal_type": "PWR", "signal_name": "GND",
+     "definition": "Common ground (Pi, LED, buzzer transistor, sensors)"},
+    {"pin": "USB (powered hub)", "signal_type": "COM", "signal_name": "ZIGBEE",
+     "definition": "XBee3 Zigbee on a USB adapter, 9600 baud; found through /dev/serial/by-id "
+                   "(override: ZIGBEE_PORT)"},
+    {"pin": "USB (powered hub)", "signal_type": "COM", "signal_name": "MESHTASTIC",
+     "definition": "Heltec WiFi LoRa 32 V3 (LoRa Meshtastic modem), 115200 baud; found through "
+                   "/dev/serial/by-id (override: MESHTASTIC_PORT)"},
 ]

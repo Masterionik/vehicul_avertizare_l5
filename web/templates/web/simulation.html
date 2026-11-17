@@ -1,0 +1,57 @@
+{% extends 'web/base.html' %}
+{% load static %}
+{% block title %}Simulation | Proximity and Impact Warning{% endblock %}
+{% block content %}
+<section class="grid">
+  <article class="card">
+    <h2>Simulated distance</h2>
+    <p class="small" id="sensor-note">Available only while the sensor is simulated.</p>
+    <div class="slider-row">
+      <input type="range" id="dist-slider" min="0" max="400" value="300" aria-label="Simulated distance in cm">
+      <output id="dist-out">300 cm</output>
+    </div>
+    <div class="toolbar">
+      <button type="button" class="btn" data-dist="300">Clear (300)</button>
+      <button type="button" class="btn" data-dist="120">Caution (120)</button>
+      <button type="button" class="btn" data-dist="60">Warning (60)</button>
+      <button type="button" class="btn" data-dist="20">Danger (20)</button>
+      <button type="button" class="btn" data-dist="0">No echo</button>
+    </div>
+  </article>
+
+  <article class="card">
+    <h2>Simulated vibration</h2>
+    <div class="slider-row">
+      <input type="range" id="vib-slider" min="1" max="10" value="4" aria-label="Number of edges">
+      <output id="vib-out">4 edges</output>
+    </div>
+    <button type="button" class="btn" id="vib-inject">Inject edges</button>
+    <p class="small">Three or more edges within 300 ms are an impact.</p>
+  </article>
+
+  <article class="card card-wide">
+    <h2>Remote vehicle alerts</h2>
+    <div class="toolbar">
+      <label>Radio
+        <select id="radio"><option value="mesh">LoRa Meshtastic</option><option value="zigbee">Zigbee</option></select>
+      </label>
+    </div>
+    <div class="toolbar">
+      <button type="button" class="btn" data-v="V2" data-s="warning">V2 warning at 40 cm</button>
+      <button type="button" class="btn" data-v="V2" data-s="danger">V2 danger at 20 cm</button>
+      <button type="button" class="btn" data-v="V3" data-s="impact">V3 impact</button>
+      <button type="button" class="btn" data-v="V3" data-s="caution">V3 caution at 120 cm</button>
+      <button type="button" class="btn" data-v="V2" data-s="clear">V2 all clear</button>
+    </div>
+    <p class="small" id="remote-note"></p>
+  </article>
+
+  <article class="card card-wide">
+    <h2>Live state</h2>
+    <div class="live"><span>Distance <b id="s-dist">--</b></span><span>Level <b id="s-level">--</b></span>
+      <span>Buzzer <b id="s-buzzer">--</b></span><span>LED <b id="s-led">--</b></span>
+      <span>Impact <b id="s-impact">--</b></span></div>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'web/js/simulation.js' %}"></script>{% endblock %}

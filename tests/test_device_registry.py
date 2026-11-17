@@ -25,7 +25,7 @@ class DeviceRegistryTests(unittest.TestCase):
                 "label": "Heltec V3",
                 "transport": "sim",
                 "address": "sim://v3",
-                "role": "Vehicul simulat V3",
+                "role": "Simulated vehicle V3",
             })
             stored = registry.list_devices()
             self.assertEqual(len(stored), 1)
@@ -69,6 +69,83 @@ class DeviceRegistryTests(unittest.TestCase):
             self.assertNotIn("/dev/ttyS4", addresses)
             self.assertIn("/dev/ttyACM0", addresses)
             self.assertIn("/dev/ttyUSB0", addresses)
+
+    def test_registry_connect_and_send_test_run_real_device_actions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry = DeviceRegistry(Path(temp_dir) / "devices.json")
+            registry.add_device({
+                "id": "mesh-demo",
+                "label": "Heltec V3",
+                "transport": "sim",
+                "address": "sim://mesh-demo",
+                "role": "Simulated vehicle V3",
+                "state": "disconnected",
+            })
+            with patch.object(DeviceRegistry, "probe_device", return_value={"ok": True, "message": "Meshtastic reachable"}):
+                connected = registry.connect_device("mesh-demo")
+                self.assertEqual(connected["device"]["state"], "connected")
+                self.assertEqual(connected["result"]["message"], "Meshtastic reachable")
+
+            with patch.object(DeviceRegistry, "probe_device", return_value={"ok": True, "message": "Test network OK"}):
+                result = registry.send_test("mesh-demo")
+                self.assertEqual(result["device"]["last_action"], "send-test")
+                self.assertEqual(result["device"]["last_test"], "ok")
+                self.assertIn("test", result["device"]["last_message"].lower())
+                self.assertIn("simulat", result["device"]["last_message"].lower())
+
+    def test_registry_disconnect_marks_device_state_and_returns_clear_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry = DeviceRegistry(Path(temp_dir) / "devices.json")
+            registry.add_device({
+                "id": "mesh-off",
+                "label": "LoRa Node",
+                "transport": "sim",
+                "address": "sim://mesh-off",
+                "role": "Simulated vehicle",
+                "state": "connected",
+            })
+
+            disconnected = registry.disconnect_device("mesh-off")
+            self.assertEqual(disconnected["device"]["state"], "disconnected")
+            self.assertIn("disconnected", disconnected["result"]["message"].lower())
+
+    def test_profile_preview_and_apply(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry = DeviceRegistry(Path(temp_dir) / "devices.json")
+            registry.add_device({
+                "id": "xiao-1",
+                "label": "XIAO",
+                "transport": "sim",
+                "address": "sim://xiao-1",
+                "region": "US_915",
+                "preset": "SHORT_FAST",
+                "channel_name": "LAB",
+            })
+            preview = registry.profile_preview("xiao-1")
+            self.assertFalse(preview["compatible"])
+            self.assertIn("region", preview["diff"])
+
+            applied = registry.apply_profile("xiao-1")
+            self.assertTrue(applied["result"]["ok"])
+            self.assertEqual(applied["device"]["region"], "EU_868")
+            self.assertEqual(applied["device"]["preset"], "LONG_FAST")
+            self.assertEqual(applied["device"]["channel_name"], "VEH")
+
+    def test_scan_preserves_disconnected_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry = DeviceRegistry(Path(temp_dir) / "devices.json")
+            registry.add_device({
+                "id": "dev-ttyacm0",
+                "label": "XIAO",
+                "transport": "serial",
+                "address": "/dev/ttyACM0",
+                "port": "/dev/ttyACM0",
+                "state": "disconnected",
+            })
+            fake_ports = [{"device": "/dev/ttyACM0", "description": "XIAO ESP32S3", "hwid": "USB"}]
+            with patch("sdc.registry.scan_serial_ports", return_value=fake_ports):
+                devices = registry.scan()
+            self.assertEqual(devices[0]["state"], "disconnected")
 
 
 if __name__ == "__main__":

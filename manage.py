@@ -1,16 +1,16 @@
 #!/usr/bin/env python
-"""Utilitarul de linie de comandă Django."""
+"""Django command-line utility."""
 import os
 import sys
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "vehicul.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
         raise ImportError(
-            "Django nu este instalat. Activează mediul virtual și rulează: "
+            "Django is not installed. Activate the virtual environment and run: "
             "pip install -r requirements.txt"
         ) from exc
     execute_from_command_line(sys.argv)

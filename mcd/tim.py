@@ -1,8 +1,7 @@
-"""Driver TIM – temporizare prin polling pentru SCHED (fără întreruperi).
+"""TIM driver: polling-based timing for SCHED (no interrupts).
 
-Canale: 1 s (poziție + Zigbee), 60 s (raport LoRa), alertă (expirare,
-verificată de SCHED la 1 s). Perioadele pierdute se resincronizează fără
-rafale de apeluri.
+Channels: 1 s (Zigbee), 60 s (status report), alert (expiry, checked by SCHED), 100 ms (node step).
+Missed periods are resynchronized without bursts of calls.
 """
 import threading
 import time
@@ -10,14 +9,15 @@ import time
 TIM_CH_1S = 0
 TIM_CH_60S = 1
 TIM_CH_ALERT = 2
-TIM_NUM_CHANNELS = 3
+TIM_CH_100MS = 3
+TIM_NUM_CHANNELS = 4
 
 TIM_MODE_PERIODIC = 0
 TIM_MODE_ONESHOT = 1
 
 _lock = threading.RLock()
-_clock = time.monotonic      # secunde, monoton
-_timers = {}                 # canal -> {"period", "mode", "deadline"}
+_clock = time.monotonic      # seconds, monotonic
+_timers = {}                 # channel -> {"period", "mode", "deadline"}
 
 
 def _now_ms():
@@ -27,11 +27,11 @@ def _now_ms():
 def _check_channel(channel):
     if (not isinstance(channel, int) or isinstance(channel, bool)
             or not 0 <= channel < TIM_NUM_CHANNELS):
-        raise ValueError("canal TIM invalid: %r" % (channel,))
+        raise ValueError("invalid TIM channel: %r" % (channel,))
 
 
 def TIM_vInit():
-    """Oprește toate canalele și revine la ceasul real."""
+    """Stop all channels and switch back to the real clock."""
     global _clock
     with _lock:
         _clock = time.monotonic
@@ -39,23 +39,23 @@ def TIM_vInit():
 
 
 def TIM_vSetClock(clock_fn):
-    """Înlocuiește sursa de timp (secunde); folosit în teste."""
+    """Replace the time source (seconds); used in tests."""
     global _clock
     with _lock:
         _clock = clock_fn
 
 
 def TIM_u32GetMs():
-    """Milisecunde de la o origine arbitrară, pe 32 de biți (se rulează la 2^32)."""
+    """Milliseconds since an arbitrary origin, 32 bit (wraps at 2^32)."""
     return _now_ms() & 0xFFFFFFFF
 
 
 def TIM_vStart(channel, period_ms, mode=TIM_MODE_PERIODIC):
     _check_channel(channel)
     if not isinstance(period_ms, int) or isinstance(period_ms, bool) or period_ms < 1:
-        raise ValueError("perioadă invalidă: %r" % (period_ms,))
+        raise ValueError("invalid period: %r" % (period_ms,))
     if mode not in (TIM_MODE_PERIODIC, TIM_MODE_ONESHOT):
-        raise ValueError("mod invalid: %r" % (mode,))
+        raise ValueError("invalid mode: %r" % (mode,))
     with _lock:
         _timers[channel] = {"period": period_ms, "mode": mode,
                             "deadline": _now_ms() + period_ms}
@@ -74,7 +74,7 @@ def TIM_bIsRunning(channel):
 
 
 def TIM_bHasElapsed(channel):
-    """True o singură dată pe perioadă scursă (consumă evenimentul)."""
+    """True once per elapsed period (consumes the event)."""
     _check_channel(channel)
     with _lock:
         tmr = _timers.get(channel)
@@ -92,7 +92,7 @@ def TIM_bHasElapsed(channel):
 
 
 def TIM_vDelayMs(ms):
-    """Întârziere blocantă."""
+    """Blocking delay."""
     if not isinstance(ms, (int, float)) or isinstance(ms, bool) or ms < 0:
-        raise ValueError("întârziere invalidă: %r" % (ms,))
+        raise ValueError("invalid delay: %r" % (ms,))
     time.sleep(ms / 1000.0)

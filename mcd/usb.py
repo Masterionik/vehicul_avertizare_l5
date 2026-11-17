@@ -1,8 +1,8 @@
-"""Driver USB (port serial) – XBee3 Zigbee și modul ESP Meshtastic (pyserial).
+"""USB driver (serial port): XBee3 Zigbee and Meshtastic ESP module (pyserial).
 
-Acces prin polling, fără blocare. Fără pyserial sau fără portul /dev/tty*
-canalul rulează în simulare (buffer TX/RX în memorie).
-Argumente invalide -> ValueError; port închis / eroare -> USBError.
+Non-blocking polling access. Without pyserial or without the /dev/tty* port
+the channel runs in simulation (in-memory TX/RX buffers).
+Invalid arguments -> ValueError; closed port / I/O error -> USBError.
 """
 import os
 import threading
@@ -11,47 +11,49 @@ from . import config
 
 try:
     import serial
-except ImportError:          # PC de dezvoltare
+except ImportError:          # development PC
     serial = None
 
 
 class USBError(OSError):
-    """Eroare de port USB (port absent, închis, eroare de I/O)."""
+    """USB port error (port missing, closed, I/O error)."""
 
 
 _lock = threading.RLock()
-_channels = {}               # canal -> {"sim", "ser", "rx", "tx"}
+_channels = {}               # channel -> {"sim", "ser", "rx", "tx"}
 
 
 def _cfg(channel):
-    return config.usb_config(channel)      # ValueError pentru canal invalid
+    return config.usb_config(channel)      # ValueError for an invalid channel
 
 
 def _get_open(channel):
     ch = _channels.get(channel)
     if ch is None:
         _cfg(channel)
-        raise USBError("canalul USB %r nu este deschis" % (channel,))
+        raise USBError("USB channel %r is not open" % (channel,))
     return ch
 
 
 def USB_vOpen(channel):
-    """Deschide canalul (idempotent)."""
+    """Open the channel (idempotent)."""
     cfg = _cfg(channel)
     with _lock:
         if channel in _channels:
             return
+        if cfg["error"] and config.simulation_mode() not in ("1", "true", "yes", "on"):
+            raise USBError(cfg["error"])       # ambiguous ports: the environment variable is required
         hw = serial is not None and os.path.exists(cfg["port"])
         if config.use_simulation(hw):
             _channels[channel] = {"sim": True, "ser": None,
                                   "rx": bytearray(), "tx": bytearray()}
             return
         if serial is None:
-            raise USBError("pyserial nu este instalat (pip install pyserial)")
+            raise USBError("pyserial is not installed (pip install pyserial)")
         try:
             ser = serial.Serial(cfg["port"], cfg["baud"], timeout=0, write_timeout=1.0)
         except (OSError, serial.SerialException) as exc:
-            raise USBError("nu pot deschide %s: %s" % (cfg["port"], exc)) from exc
+            raise USBError("cannot open %s: %s" % (cfg["port"], exc)) from exc
         _channels[channel] = {"sim": False, "ser": ser, "rx": None, "tx": None}
 
 
@@ -81,9 +83,9 @@ def USB_bIsSimulated(channel):
 
 
 def USB_u16Write(channel, data):
-    """Trimite octeți; returnează numărul de octeți scriși."""
+    """Send bytes; return the number of bytes written."""
     if not isinstance(data, (bytes, bytearray, memoryview)):
-        raise ValueError("data trebuie să fie bytes")
+        raise ValueError("data must be bytes")
     with _lock:
         ch = _get_open(channel)
         if ch["sim"]:
@@ -92,20 +94,20 @@ def USB_u16Write(channel, data):
         try:
             return int(ch["ser"].write(bytes(data)))
         except (OSError, serial.SerialException) as exc:
-            raise USBError("scriere USB eșuată: %s" % exc) from exc
+            raise USBError("USB write failed: %s" % exc) from exc
 
 
 def USB_u16Available(channel):
-    """Numărul de octeți primiți și neciți."""
+    """Number of received bytes not yet read."""
     with _lock:
         ch = _get_open(channel)
         return len(ch["rx"]) if ch["sim"] else int(ch["ser"].in_waiting)
 
 
 def USB_baRead(channel, max_len=256):
-    """Citește fără blocare până la `max_len` octeți (b"" dacă nu e nimic)."""
+    """Read up to `max_len` bytes without blocking (b"" if nothing is available)."""
     if not isinstance(max_len, int) or isinstance(max_len, bool) or max_len < 1:
-        raise ValueError("max_len invalid: %r" % (max_len,))
+        raise ValueError("invalid max_len: %r" % (max_len,))
     with _lock:
         ch = _get_open(channel)
         if ch["sim"]:
@@ -116,11 +118,11 @@ def USB_baRead(channel, max_len=256):
             n = min(int(ch["ser"].in_waiting), max_len)
             return bytes(ch["ser"].read(n)) if n else b""
         except (OSError, serial.SerialException) as exc:
-            raise USBError("citire USB eșuată: %s" % exc) from exc
+            raise USBError("USB read failed: %s" % exc) from exc
 
 
 def USB_vFlush(channel):
-    """Șterge datele primite și neciți."""
+    """Discard received data that has not been read."""
     with _lock:
         ch = _get_open(channel)
         if ch["sim"]:
@@ -129,22 +131,22 @@ def USB_vFlush(channel):
             ch["ser"].reset_input_buffer()
 
 
-# --------------------------------------------------------- ajutoare simulare
+# --------------------------------------------------------- simulation helpers
 def USB_vSimInject(channel, data):
-    """Doar în simulare: pune octeți în bufferul de recepție."""
+    """Simulation only: put bytes into the receive buffer."""
     with _lock:
         ch = _get_open(channel)
         if not ch["sim"]:
-            raise RuntimeError("USB_vSimInject este disponibil doar în simulare")
+            raise RuntimeError("USB_vSimInject is only available in simulation")
         ch["rx"].extend(data)
 
 
 def USB_baSimTakeTx(channel):
-    """Doar în simulare: returnează și golește ce s-a trimis."""
+    """Simulation only: return and clear what was sent."""
     with _lock:
         ch = _get_open(channel)
         if not ch["sim"]:
-            raise RuntimeError("USB_baSimTakeTx este disponibil doar în simulare")
+            raise RuntimeError("USB_baSimTakeTx is only available in simulation")
         out = bytes(ch["tx"])
         ch["tx"].clear()
         return out

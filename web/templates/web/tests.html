@@ -1,0 +1,14 @@
+{% extends 'web/base.html' %}
+{% load static %}
+{% block title %}Tests | Proximity and Impact Warning{% endblock %}
+{% block content %}
+<section class="grid">
+  <article class="card card-wide">
+    <h2>Component tests</h2>
+    <p class="small">Each test runs on the real hardware, or on the simulation when a part is simulated.</p>
+    <div class="toolbar"><button type="button" class="btn" id="run-all">Run all</button></div>
+    <div id="tests" class="rows"></div>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'web/js/tests.js' %}"></script>{% endblock %}

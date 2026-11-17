@@ -1,21 +1,27 @@
-"""SDC layer package."""
+"""SDC layer: communication (transports, Meshtastic and Zigbee links, signed alert packet)."""
 
 from .meshtastic_link import MeshtasticLink
-from .packets import AlertPacket, PositionPacket, decode_packet, encode_position_packet, validate_replay
+from .packets import (
+    ALERT_LEN,
+    BadSignatureError,
+    FrameDecoder,
+    PacketError,
+    ReplayGuard,
+    decode_alert,
+    encode_alert,
+    frame_encode,
+    node_id_from_name,
+    validate_replay,
+)
 from .transport_serial import SerialTransport
+from .transport_sim import SimulatedTransport
 from .transport_tcp import TCPTransport
 from .transport_zigbee import ZigbeeTransport
 from .zigbee_link import ZigbeeLink
 
 __all__ = [
-    "PositionPacket",
-    "AlertPacket",
-    "encode_position_packet",
-    "decode_packet",
-    "validate_replay",
-    "SerialTransport",
-    "TCPTransport",
-    "ZigbeeTransport",
-    "MeshtasticLink",
-    "ZigbeeLink",
+    "ALERT_LEN", "BadSignatureError", "FrameDecoder", "PacketError", "ReplayGuard",
+    "decode_alert", "encode_alert", "frame_encode", "node_id_from_name", "validate_replay",
+    "SerialTransport", "SimulatedTransport", "TCPTransport", "ZigbeeTransport",
+    "MeshtasticLink", "ZigbeeLink",
 ]

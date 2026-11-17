@@ -1,5 +1,3 @@
-# Doar pe Raspberry Pi (hardware real). Pe PC driverele rulează în simulare.
+# Raspberry Pi: lgpio comes from apt (sudo apt install python3-lgpio) and the venv
+# must be created with --system-site-packages.
 -r requirements.txt
-lgpio
-smbus2
-pyserial

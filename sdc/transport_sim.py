@@ -1,25 +1,45 @@
-"""Simulated device transport used for CI and local development."""
+"""Simulated device transport used for CI and local development.
+
+Everything stays in memory. With ``loopback=True`` whatever is sent can also be received, which
+lets the whole TX -> RX chain be tested on a laptop. ``inject_rx`` simulates a packet arriving
+from a remote node. ``sent_packets`` keeps the raw bytes of the last transmitted packets so tests
+can inspect them after ``poll()`` has consumed the event queue.
+"""
 
 from __future__ import annotations
 
+import threading
+from collections import deque
 from datetime import datetime, timezone
 
 from .transport import Transport
 
+_MAX_EVENTS = 500
+_MAX_SENT = 100
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 
 class SimulatedTransport(Transport):
-    """Minimal in-memory simulator matching the transport contract."""
+    """In-memory simulator matching the transport contract. Thread-safe."""
 
-    def __init__(self, name: str = "sim"):
+    def __init__(self, name: str = "sim", *, loopback: bool = False):
         super().__init__(name=name)
-        self._events: list[dict] = []
+        self.loopback = bool(loopback)
+        self._lock = threading.RLock()
+        self._events: deque = deque(maxlen=_MAX_EVENTS)
+        self.sent_packets: deque = deque(maxlen=_MAX_SENT)
 
     def open(self) -> bool:
-        self._connected = True
+        with self._lock:
+            self._connected = True
         return True
 
     def close(self) -> None:
-        self._connected = False
+        with self._lock:
+            self._connected = False
 
     def is_open(self) -> bool:
         return self._connected
@@ -31,34 +51,57 @@ class SimulatedTransport(Transport):
             "state": "connected" if self._connected else "disconnected",
             "transport": "sim",
             "connected": self._connected,
+            "simulated": True,
+            "loopback": self.loopback,
         }
 
     def send_text(self, dest: str, text: str) -> int:
+        if not self._connected:
+            return 0
         payload = str(text)
-        self._events.append({
-            "kind": "tx",
-            "source": self.name,
-            "destination": str(dest),
-            "payload": payload,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        with self._lock:
+            self._events.append({
+                "kind": "tx", "source": self.name, "destination": str(dest),
+                "payload": payload, "ts": _now(),
+            })
+            if self.loopback:
+                self._events.append({
+                    "kind": "rx", "source": self.name, "portnum": 1,
+                    "payload": payload.encode("utf-8").hex(), "text": payload, "ts": _now(),
+                })
         return len(payload)
 
     def send_packet(self, dest: str, payload: bytes, portnum: int = 256) -> int:
+        if not self._connected:
+            return 0
         raw = bytes(payload)
-        self._events.append({
-            "kind": "tx",
-            "source": self.name,
-            "destination": str(dest),
-            "payload": raw.hex(),
-            "portnum": int(portnum),
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        with self._lock:
+            self.sent_packets.append(raw)
+            self._events.append({
+                "kind": "tx", "source": self.name, "destination": str(dest),
+                "payload": raw.hex(), "portnum": int(portnum), "ts": _now(),
+            })
+            if self.loopback:
+                self._events.append({
+                    "kind": "rx", "source": self.name, "portnum": int(portnum),
+                    "payload": raw.hex(), "ts": _now(),
+                })
         return len(raw)
 
+    def inject_rx(self, payload: bytes, portnum: int = 256) -> None:
+        """Simulate bytes received from a remote node (works while the transport is open)."""
+        with self._lock:
+            if not self._connected:
+                return
+            self._events.append({
+                "kind": "rx", "source": self.name, "portnum": int(portnum),
+                "payload": bytes(payload).hex(), "ts": _now(),
+            })
+
     def poll(self) -> list[dict]:
-        events = list(self._events)
-        self._events.clear()
+        with self._lock:
+            events = list(self._events)
+            self._events.clear()
         return events
 
     def get_config(self) -> dict:

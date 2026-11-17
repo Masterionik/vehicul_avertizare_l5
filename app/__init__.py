@@ -1,15 +1,7 @@
-"""Application logic layer."""
+"""APP layer: pure application logic. Imports only ``rte`` (and the standard library).
 
-from .acc import detect_impact
-from .nbr import filter_neighbours
-from .pos import load_route, load_route_from_data, position_at_index
-from .rpt import build_report
+Modules: ``prx`` (proximity level), ``imp`` (impact detection), ``alr`` (alert manager),
+``rpt`` (60 s report), ``node`` (runtime step).
+"""
 
-__all__ = [
-    "detect_impact",
-    "filter_neighbours",
-    "load_route",
-    "load_route_from_data",
-    "position_at_index",
-    "build_report",
-]
+__all__ = ["prx", "imp", "alr", "rpt", "node"]

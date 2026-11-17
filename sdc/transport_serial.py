@@ -65,6 +65,7 @@ class SerialTransport(Transport):
             "transport": "serial",
             "port": self.port,
             "connected": self.is_open(),
+            "simulated": False,
             "error": self._error,
         }
 

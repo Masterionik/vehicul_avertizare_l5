@@ -58,6 +58,7 @@ class TCPTransport(Transport):
             "host": self.host,
             "port": self.port,
             "connected": self.is_open(),
+            "simulated": False,
             "error": self._error,
         }
 
